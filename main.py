@@ -203,7 +203,7 @@ class CamThread(PyQt5.QtCore.QThread):
                 time.sleep(0.001)
 
             if self.parent.control.active:
-                image, meta = self.parent.device.cam.image(image_number=0xFFFFFFFF) # readout the lastest image
+                image, meta = self.parent.device.cam.image(image_index=0xFFFFFFFF) # readout the lastest image
                 # image is in "unit16" data type, althought it only has 14 non-zero bits at most
                 # convert the image data type to float, to avoid overflow
                 image = np.flip(image.T, 1).astype("float")
