@@ -189,7 +189,7 @@ class CamThread(PyQt5.QtCore.QThread):
         self.last_time = time.time()
 
     def run(self):
-        while self.counter < self.counter_limit and self.parent.control.active:         
+        while self.counter < self.counter_limit and self.parent.control.active:        
             if self.parent.device.trigger_mode == "software":
                 self.parent.device.cam.sdk.force_trigger() # software-ly trigger the camera
                 time.sleep(0.5)
@@ -214,16 +214,13 @@ class CamThread(PyQt5.QtCore.QThread):
                                 ystart : ystart+self.parent.device.image_shape['ymax']]
 
                 if image_type == "background":
-                    self.counter += 1
                     self.image_bg = image
                     self.img_dict["type"] = "background"
                     self.img_dict["counter"] = self.counter
                     self.img_dict["image"] = image
                     self.signal.emit(self.img_dict)
-                    
-                        
+
                 elif image_type == "signal":
-                    self.counter += 1
                     self.image_signal = image
                     self.img_dict["type"] = "signal"
                     self.img_dict["counter"] = self.counter
@@ -233,8 +230,8 @@ class CamThread(PyQt5.QtCore.QThread):
                 else:
                     logging.warning("Measurement type not supported.")
                     return
-                    
-                if self.counter%2 == 0: #checking to see if this is the second image taken
+                                                   
+                if self.counter%2 == 1: #checking to see if this is the second image taken
                     if self.parent.control.meas_mode == "fluorescence": 
                         image_post = self.image_signal - self.image_bg
                     elif self.parent.control.meas_mode == "absorption":
@@ -247,7 +244,7 @@ class CamThread(PyQt5.QtCore.QThread):
                     image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
                                                         self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]
                     sc = np.sum(image_post_roi) # signal count
-                    num = int(self.counter/len(self.image_order))
+                    num = int(self.counter/len(self.image_order)+0.5)
                     
                     # self.img_dict["type"] = "signal"
                     self.img_dict["num_image"] = num
@@ -257,6 +254,7 @@ class CamThread(PyQt5.QtCore.QThread):
                     self.img_dict["signal_count"] = np.format_float_scientific(sc, precision=4)
                     self.img_dict["signal_count_raw"] = sc
                     
+                    print(self.parent.control.control_mode)
                     if self.parent.control.control_mode == "record":
                         # a list to save signal count of every single image
                         self.signal_count_list.append(sc)
@@ -279,7 +277,8 @@ class CamThread(PyQt5.QtCore.QThread):
 
                     # transfer saved data back to main thread by signal-slot mechanism
                     self.signal.emit(self.img_dict)
-                   
+                
+                self.counter += 1   
                 # If I call "update imge" function here to update images in main thread, it sometimes work but sometimes not.
                 # It may be because PyQt is not thread safe. A signal-slot way seemed to be preferred,
                 # e.g. https://stackoverflow.com/questions/54961905/real-time-plotting-using-pyqtgraph-and-threading
@@ -889,7 +888,7 @@ class Control(Scrollarea):
             img = img_dict["image"]
             self.parent.image_win.imgs_dict["Raw Signal"].setImage(img, autoLevels=self.parent.image_win.auto_scale_state_dict["Raw Signal"])
 
-        if img_dict['counter']%2 == 0: #Checking if second image
+        if img_dict['counter']%2 == 1: #Checking if second image
             self.num_image.setText(str(img_dict["num_image"]))
 
             img = img_dict["image_post"]

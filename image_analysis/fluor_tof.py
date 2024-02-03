@@ -1,11 +1,12 @@
 import numpy as np
 from scipy import optimize
 from scipy import stats
-import uncertainties.unumpy as unp
+import uncertainties.numpy as unp
 import uncertainties as unc
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import h5py
+from scipy.constants import k, u
 
 def gaussian(amp, x_mean, y_mean, x_width, y_width, offset):
     x_width = float(x_width)
@@ -64,7 +65,7 @@ def linearfit(x, y, yerr):
 
 class tofanalysis:
     def __init__(self, fname, gname):
-        param = {"pixeltomm": 0.107, "kB": 1.38064852e-23, "m": 86.9*1.66053873e-27, "confidence_band": 0.95}
+        param = {"pixeltomm": 0.107, "m": 86.9*1.66053873e-27, "confidence_band": 0.95}
 
         time_sq, axial_width_sq, axial_width_sq_err, radial_width_sq, radial_width_sq_err = self.readhdf(fname, gname, param)
 
@@ -144,8 +145,8 @@ class tofanalysis:
         width_sq_fit = linear(x, *popt)
         c = stats.norm.ppf((1+param["confidence_band"])/2) # 95% confidence level gives critical value c=1.96
         perr = np.sqrt(np.diag(pcov)) # gives the standard deviation of fitting parameters
-        temp = popt[0]*param["m"]/param["kB"]*1e6 # convert to uK
-        temp_err = perr[0]*param["m"]/param["kB"]*1e6
+        temp = popt[0]*param["m"]/k*1e6 # convert to uK
+        temp_err = perr[0]*param["m"]/k*1e6
         radius = np.sqrt(popt[1])
         radius_err = 0.5*perr[1]/np.sqrt(popt[1])
         label = type + ": {:.0f}({:.0f}) uK, {:.2f}({:.2f}) mm, $\chi^2_\\nu$: {:.2f}".format(temp, temp_err, radius, radius_err, reduced_chisq)
