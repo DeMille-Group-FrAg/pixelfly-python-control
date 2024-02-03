@@ -189,7 +189,7 @@ class CamThread(PyQt5.QtCore.QThread):
         self.last_time = time.time()
 
     def run(self):
-        while self.counter < self.counter_limit and self.parent.control.active:        
+        while self.counter < self.counter_limit and self.parent.control.active:
             if self.parent.device.trigger_mode == "software":
                 self.parent.device.cam.sdk.force_trigger() # software-ly trigger the camera
                 time.sleep(0.5)
@@ -218,14 +218,12 @@ class CamThread(PyQt5.QtCore.QThread):
                     self.img_dict["type"] = "background"
                     self.img_dict["counter"] = self.counter
                     self.img_dict["image"] = image
-                    self.signal.emit(self.img_dict)
 
                 elif image_type == "signal":
                     self.image_signal = image
                     self.img_dict["type"] = "signal"
                     self.img_dict["counter"] = self.counter
                     self.img_dict["image"] = image
-                    self.signal.emit(self.img_dict)
                     
                 else:
                     logging.warning("Measurement type not supported.")
@@ -275,8 +273,8 @@ class CamThread(PyQt5.QtCore.QThread):
                         self.img_dict["signal_count_scan"] = self.signal_count_dict
                         self.img_dict["scan_param"] = scan_param
 
-                    # transfer saved data back to main thread by signal-slot mechanism
-                    self.signal.emit(self.img_dict)
+                # transfer saved data back to main thread by signal-slot mechanism
+                self.signal.emit(self.img_dict)
                 
                 self.counter += 1   
                 # If I call "update imge" function here to update images in main thread, it sometimes work but sometimes not.
@@ -879,6 +877,7 @@ class Control(Scrollarea):
     @PyQt5.QtCore.pyqtSlot(dict)
     def img_ctrl_update(self, img_dict):
         img_type = img_dict["type"] # "image" or "bkg"
+        print(img_type)
         if img_type == "background":
             img = img_dict["image"]
             # update background image
@@ -999,14 +998,15 @@ class Control(Scrollarea):
                     root = root.require_group(self.scan_elem_name+"_"+img_dict["scan_param"])
                     root.attrs["scanned parameter"] = self.scan_elem_name
                     root.attrs["scanned param value"] = img_dict["scan_param"]
+                #dset = root.create_dataset(name = "image" + "_{:06d}".format(img_dict["counter"]),  data = img_dict["image"], shape = img_dict["image"].shape, dtype = "f", compression = "gzip", compression_opts = 4)
                 dset = root.create_dataset(
-                                name                 = "image" + "_{:06d}".format(img_dict["counter"]),
-                                data                 = img_dict["image"],
-                                shape                = img_dict["image"].shape,
-                                dtype                = "f",
-                                compression          = "gzip",
-                                compression_opts     = 4
-                            )
+                                            name                 = "image" + "_{:06d}".format(img_dict["counter"]),
+                                            data                 = img_dict["image"],
+                                            shape                = img_dict["image"].shape,
+                                            dtype                = "f",
+                                            compression          = "gzip",
+                                            compression_opts     = 4
+                                        )
                 # dset.attrs["signal count"] = img_dict["signal_count"]
                 dset.attrs["measurement type"] = self.meas_mode
                 dset.attrs["region of interest: xmin"] = self.roi["xmin"]
@@ -1551,6 +1551,7 @@ class ImageWin(Scrollarea):
 class CameraGUI(qt.QMainWindow):
     def __init__(self, app):
         super().__init__()
+        time.sleep(0.1) #It appears this sleep is necessary to run on python 3.11.2. Not sure why
         self.setWindowTitle('pco.pixelfly usb (ring buffer)')
         self.setStyleSheet("QWidget{font: 10pt;}")
         # self.setStyleSheet("QToolTip{background-color: black; color: white; font: 10pt;}")
