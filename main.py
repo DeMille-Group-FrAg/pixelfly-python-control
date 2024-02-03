@@ -228,7 +228,13 @@ class CamThread(PyQt5.QtCore.QThread):
                 else:
                     logging.warning("Measurement type not supported.")
                     return
-                                                   
+                
+                num = int(self.counter/len(self.image_order)+1) #num is number of post-proceed image (ie signal - background)
+                if self.parent.control.control_mode == "scan":
+                    # value of the scan parameter
+                    scan_param = self.parent.control.scan_config[f"scan_value_{num-1}"][self.parent.control.scan_elem_name]
+                    self.img_dict["scan_param"] = scan_param
+                                                       
                 if self.counter%2 == 1: #checking to see if this is the second image taken
                     if self.parent.control.meas_mode == "fluorescence": 
                         image_post = self.image_signal - self.image_bg
@@ -242,7 +248,7 @@ class CamThread(PyQt5.QtCore.QThread):
                     image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
                                                         self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]
                     sc = np.sum(image_post_roi) # signal count
-                    num = int(self.counter/len(self.image_order)+0.5)
+                    #num = int(self.counter/len(self.image_order)+1)
                     
                     # self.img_dict["type"] = "signal"
                     self.img_dict["num_image"] = num
@@ -252,7 +258,6 @@ class CamThread(PyQt5.QtCore.QThread):
                     self.img_dict["signal_count"] = np.format_float_scientific(sc, precision=4)
                     self.img_dict["signal_count_raw"] = sc
                     
-                    print(self.parent.control.control_mode)
                     if self.parent.control.control_mode == "record":
                         # a list to save signal count of every single image
                         self.signal_count_list.append(sc)
@@ -263,16 +268,13 @@ class CamThread(PyQt5.QtCore.QThread):
                         self.img_dict["signal_count_ave"] = np.format_float_scientific(np.mean(self.signal_count_list), precision=4)
                         self.img_dict["signal_count_err"] = np.format_float_scientific(np.std(self.signal_count_list)/np.sqrt(num), precision=4)
                     elif self.parent.control.control_mode == "scan":
-                        # value of the scan parameter
-                        scan_param = self.parent.control.scan_config[f"scan_value_{num-1}"][self.parent.control.scan_elem_name]
                         # a dictionary that saves values of scan parameters as keys and a list of signal counts of corresponding images as vals
                         if scan_param in self.signal_count_dict:
                             self.signal_count_dict[scan_param] = np.append(self.signal_count_dict[scan_param], sc)
                         else:
                             self.signal_count_dict[scan_param] = np.array([sc])
                         self.img_dict["signal_count_scan"] = self.signal_count_dict
-                        self.img_dict["scan_param"] = scan_param
-
+                        
                 # transfer saved data back to main thread by signal-slot mechanism
                 self.signal.emit(self.img_dict)
                 
@@ -877,7 +879,6 @@ class Control(Scrollarea):
     @PyQt5.QtCore.pyqtSlot(dict)
     def img_ctrl_update(self, img_dict):
         img_type = img_dict["type"] # "image" or "bkg"
-        print(img_type)
         if img_type == "background":
             img = img_dict["image"]
             # update background image
@@ -998,7 +999,6 @@ class Control(Scrollarea):
                     root = root.require_group(self.scan_elem_name+"_"+img_dict["scan_param"])
                     root.attrs["scanned parameter"] = self.scan_elem_name
                     root.attrs["scanned param value"] = img_dict["scan_param"]
-                #dset = root.create_dataset(name = "image" + "_{:06d}".format(img_dict["counter"]),  data = img_dict["image"], shape = img_dict["image"].shape, dtype = "f", compression = "gzip", compression_opts = 4)
                 dset = root.create_dataset(
                                             name                 = "image" + "_{:06d}".format(img_dict["counter"]),
                                             data                 = img_dict["image"],
