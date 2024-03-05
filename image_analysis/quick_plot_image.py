@@ -7,16 +7,16 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import h5py
 from matplotlib import cm
-from scipy.constants import k
+from scipy.constants import k, u
 
 class imageave:
     def __init__(self):
-        param = {"pixeltomm": 0.107, "m": 109*1.66053873e-27, "confidence_band": 0.95}
-        roi = {"xmin":150, "xmax":225, "ymin":100, "ymax":175}
+        param = {"pixeltomm": 13.45*4*1e-3, "m": 109*u, "confidence_band": 0.95}
+        roi = {"xmin":75, "xmax":125, "ymin":150, "ymax":200}
         scale_factor = 6.45*2*4
 
         filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-        motimages = {"fname": "images_20230915.hdf", "gname":"First_Temperature_Measurement_20230915_162119", "subgname":"PulseBlasterUSB_instruction no. 3 (ns)_1000000.0", 'file_name': 'image_000002'}
+        motimages = {"fname": "images_20240206.hdf", "gname":"FirstTemp_20240206_132137", "subgname":"PulseBlasterUSB_instruction no. 3 (ns)_1000000.0", 'file_name': 'image_000000'}
 
         img = self.readhdf(filepath, motimages)[roi["xmin"]:roi["xmax"], roi["ymin"]:roi["ymax"]]
         print(type(img))

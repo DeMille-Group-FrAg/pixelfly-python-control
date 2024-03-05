@@ -56,6 +56,7 @@ def gaussianfit(data):
     p_dict["y_width"] = p[4]
     p_dict["amp"] = p[0]
     p_dict["offset"] = p[5]
+    p_dict["peak"] = np.max(data)
 
     return p_dict
 
@@ -170,6 +171,8 @@ class CamThread(PyQt5.QtCore.QThread):
         super().__init__()
         self.parent = parent
         self.image_order = [x.strip() for x in self.parent.defaults["measurement"]["image_order"].split(',')]
+        self.pixeltomm = self.parent.defaults["atomic"].getfloat('pixeltomm')
+        self.cross_section = self.parent.defaults["atomic"].getfloat('cross_section')
         self.counter_limit = self.parent.control.num_img_to_take*len(self.image_order)
         self.counter = 0
         self.img_dict = {}
@@ -193,20 +196,23 @@ class CamThread(PyQt5.QtCore.QThread):
             if self.parent.device.trigger_mode == "software":
                 self.parent.device.cam.sdk.force_trigger() # software-ly trigger the camera
                 time.sleep(0.5)
-
+            print(self.counter)
             while self.parent.control.active:
                 # wait until a new image is available,
                 # this step will block the thread, so it can;t be in the main thread
                 if self.parent.device.cam.rec.get_status()['dwProcImgCount'] > self.counter:
+                    print(self.parent.device.cam.rec.get_status()['dwProcImgCount'])
+                    print('yes')
                     break
                 time.sleep(0.001)
-
+            
             if self.parent.control.active:
+                print('made it!')
                 image, meta = self.parent.device.cam.image(image_index=0xFFFFFFFF) # readout the lastest image
                 image_type = self.image_order[self.counter%2] # odd-numbered image is signal, even-numbered image is background
                 # image is in "unit16" data type, althought it only has 14 non-zero bits at most
                 # convert the image data type to float, to avoid overflow
-                
+                print(image_type)
                 image = np.flip(image.T, 1).astype("float")
                 xstart = int(image.shape[0]/2 - self.parent.device.image_shape['xmax']/2)
                 ystart = int(image.shape[1]/2 - self.parent.device.image_shape['ymax']/2)
@@ -218,6 +224,7 @@ class CamThread(PyQt5.QtCore.QThread):
                     self.img_dict["type"] = "background"
                     self.img_dict["counter"] = self.counter
                     self.img_dict["image"] = image
+                    print('Taking bkg')
 
                 elif image_type == "signal":
                     self.image_signal = image
@@ -238,21 +245,23 @@ class CamThread(PyQt5.QtCore.QThread):
                 if self.counter%2 == 1: #checking to see if this is the second image taken
                     if self.parent.control.meas_mode == "fluorescence": 
                         image_post = self.image_signal - self.image_bg
+                        image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
+                                                        self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]
+                   
+                        sc = np.sum(image_post_roi) # signal count 
                     elif self.parent.control.meas_mode == "absorption":
-                        image_post = np.divide(image, self.image_bg)
-                        image_post = -np.log(image_post)                            
+                        image_post = np.divide(self.image_signal, self.image_bg)
+                        image_post = -np.log(image_post)                        
+                        image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
+                                                        self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]    
+                        sc = np.sum(image_post_roi)*(self.pixeltomm)**2/self.cross_section # signal count
                     else:
                         logging.warning("Measurement type not supported.")
                         return
                                 
-                    image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
-                                                        self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]
-                    sc = np.sum(image_post_roi) # signal count
                     #num = int(self.counter/len(self.image_order)+1)
                     
-                    # self.img_dict["type"] = "signal"
                     self.img_dict["num_image"] = num
-                    # self.img_dict["image"] = image
                     self.img_dict["image_post"] = image_post
                     self.img_dict["image_post_roi"] = image_post_roi
                     self.img_dict["signal_count"] = np.format_float_scientific(sc, precision=4)
@@ -622,6 +631,11 @@ class Control(Scrollarea):
         self.offset.setText("0")
         self.offset.setStyleSheet("QWidget{background-color: gray;}")
         img_ctrl_frame.addRow("2D gaussian fit (offset):", self.offset)
+        
+        self.peak = qt.QLabel()
+        self.peak.setText("0")
+        self.peak.setStyleSheet("QWidget{background-color: gray;}")
+        img_ctrl_frame.addRow("Peak Signal:", self.peak)
 
     # place camera control gui elements
     def place_cam_control(self):
@@ -809,6 +823,7 @@ class Control(Scrollarea):
         self.x_stand_dev.setText("0")
         self.y_mean.setText("0")
         self.y_stand_dev.setText("0")
+        self.peak.setText("0")
 
         # initialize a hdf group if image saving is required
         if self.img_save:
@@ -977,7 +992,8 @@ class Control(Scrollarea):
                 self.x_stand_dev.setText("{:.2f}".format(param["x_width"]))
                 self.y_mean.setText("{:.2f}".format(param["y_mean"]+self.roi["ymin"]))
                 self.y_stand_dev.setText("{:.2f}".format(param["y_width"]))
-
+                self.peak.setText("{:.2f}".format(param["peak"]))
+                
                 xy = np.indices((self.roi["xmax"]-self.roi["xmin"], self.roi["ymax"]-self.roi["ymin"]))
                 fit = gaussian(param["amp"], param["x_mean"], param["y_mean"], param["x_width"], param["y_width"], param["offset"])(*xy)
 

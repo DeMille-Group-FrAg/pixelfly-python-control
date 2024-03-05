@@ -6,6 +6,8 @@ import uncertainties as unc
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import h5py
+from scipy.constants import k, u
+import addcopyfighandler
 
 def gaussian(amp, x_mean, y_mean, x_width, y_width, offset):
     x_width = float(x_width)
@@ -51,7 +53,7 @@ def gaussianfit(data, roi, showimg=False):
 class atomnumanalysis:
     def __init__(self, fname, gname, detuning):
         # resonant_cross_section in mm^2, linewidth in MHz
-        param = {"pixeltomm": 0.099, "kB": 1.38064852e-23, "m": 86.9*1.66053873e-27, "confidence_band": 0.95, "resonant_cross_section": 1.356e-7, "linewidth":6.065}
+        param = {"pixeltomm": 99*2/(27)*4*1e-3, "kB": k, "m": 109*u, "confidence_band": 0.95, "resonant_cross_section": 5/3*(328e-6)**2/(2*np.pi), "linewidth":23.4}
 
         atom_num = self.readhdf(fname, gname, param, detuning)
 
@@ -73,11 +75,27 @@ class atomnumanalysis:
             atom_num = np.array([])
             cross_section = param["resonant_cross_section"]/(1+4*(detuning/param["linewidth"])**2)
 
+            test = []
             for img in group.keys():
-                img_data = group[img]
-                roi = {"xmin":105, "xmax":175, "ymin":75, "ymax":155} # choose a braod roi for the first fit trial
+                test.append(img)
 
-                fitresult = gaussianfit(img_data, roi)
+            plt.figure()
+            plt.imshow(group[test[0]], cmap='viridis')
+            plt.show()
+
+            for i in range (int(len(group)/2)):
+                img_data = np.divide(np.array(group[test[i*2]]), np.array(group[test[2*i+1]]))
+                #img_data = np.divide(np.array(group[test[i*2]]) - np.full((348, 260), 200), np.array(group[test[2*i+1]])-np.full((348, 260), 200))
+                img_data = -1*np.log(img_data)
+
+                #roi = {"xmin":70, "xmax":110, "ymin":40, "ymax":80} # choose a braod roi for the first fit trial for extend pixel range
+                roi = {"xmin":180, "xmax":220, "ymin":100, "ymax":140} # choose a braod roi for the first fit trial
+                #roi = {"xmin":0, "xmax":250, "ymin":100, "ymax":300} # choose a braod roi for the first fit trial
+
+                new_roi = roi
+                fitresult = gaussianfit(img_data, roi, showimg = True)
+                print(fitresult)
+
                 new_roi = {} # calculate a new roi based on the first fit result (use +/-3sigma region)
                 new_roi["xmin"] = int(np.maximum(roi["xmin"]+fitresult["x_mean"]-3*fitresult["x_width"], 0))
                 new_roi["xmax"] = int(np.minimum(roi["xmin"]+fitresult["x_mean"]+3*fitresult["x_width"], img_data.shape[0]))
@@ -92,8 +110,19 @@ class atomnumanalysis:
                 new_roi["ymin"] = int(np.maximum(roi["ymin"]+fitresult["y_mean"]-3*fitresult["y_width"], 0))
                 new_roi["ymax"] = int(np.minimum(roi["ymin"]+fitresult["y_mean"]+3*fitresult["y_width"], img_data.shape[1]))
 
+
+
                 sc = np.sum(img_data[new_roi["xmin"]:new_roi["xmax"], new_roi["ymin"]:new_roi["ymax"]]) # signal count
-                atom_num = np.append(atom_num, sc*(param["pixeltomm"]**2)/cross_section)
+                print(sc)
+                atom_num_summing = np.append(atom_num, sc*(param["pixeltomm"]**2)/cross_section)
+                print("Atom number summing: " + str(atom_num_summing[0]/1e6))
+                signal = fitresult["amp"] * 2*np.pi * fitresult["x_width"]  * fitresult["y_width"]
+                atom_num = np.append(atom_num, signal*(param["pixeltomm"]**2)/cross_section)
+
+
+                density = atom_num/((2*np.pi)**1.5*(fitresult["x_width"] * fitresult["x_width"] * fitresult["y_width"] *(param["pixeltomm"]**3) *1e-3 *1e-3*1e-3))/1e6/1e10
+                print("Atom Number: " + str(np.mean(atom_num/1e6)))
+                print('Density:' + str(np.mean(density)))
 
         return atom_num
 
@@ -109,11 +138,11 @@ class atomnumanalysis:
         self.ax.fill_between(x, np.ones(len(atom_num))*(mean-c*std), np.ones(len(atom_num))*(mean+c*std), color=color, alpha=0.2, label="{:.0f}% confidence band".format(param["confidence_band"]*100))
 
 
-filepath = "C:/Users/dur!p5/github/pixelfly-python-control/saved_images/"
-filename = "images_20210922.hdf"
+filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
+filename = "images_20240304.hdf"
 fname = filepath + filename
-gname = "rfabsrp_lambda_20210922_190640"
-detuning = 26 # in MHz
+gname = "Density_20240304_" + "19" + "0011"
+detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)
 # indicate uncertainties at "confidence_band" confidence level

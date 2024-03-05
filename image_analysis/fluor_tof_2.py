@@ -1,12 +1,14 @@
 import numpy as np
 from scipy import optimize
 from scipy import stats
-import uncertainties.numpy as unp
+import uncertainties.unumpy as unp
 import uncertainties as unc
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import h5py
 from scipy.constants import k, u
+import os
+import addcopyfighandler
 
 def gaussian(xdata, amp, x_mean, y_mean, x_width, y_width, offset):
     x, y = xdata
@@ -22,7 +24,7 @@ def gaussianfit(data, roi, showimg=False):
     # calculate moments for initial guess
     data = data[roi["xmin"]:roi["xmax"], roi["ymin"]:roi["ymax"]]
     if showimg:
-        plt.imshow(data)
+        plt.imshow(data, cmap='viridis')
         plt.show()
 
     total = np.sum(data)
@@ -39,6 +41,7 @@ def gaussianfit(data, roi, showimg=False):
     xdata = np.vstack((X.ravel(), Y.ravel()))
     ydata = np.ravel(data)
     p, pcov = optimize.curve_fit(gaussian, xdata, ydata, p0=(amp, x_mean, y_mean, x_width, y_width, offset))
+    print(p)
     pstd = np.sqrt(np.diag(pcov))
 
     p_dict = {}
@@ -70,7 +73,7 @@ def linearfit(x, y, yerr):
 
 class tofanalysis:
     def __init__(self, fname, gname):
-        param = {"pixeltomm": 0.107, "m": 108.904755778*u, "confidence_band": 0.95}
+        param = {"pixeltomm": 99*2/(25)*4*1e-3, "m": 108.904755778*u, "confidence_band": 0.95}
 
         time_sq, axial_width_sq, axial_width_sq_err, radial_width_sq, radial_width_sq_err = self.readhdf(fname, gname, param)
 
@@ -106,29 +109,48 @@ class tofanalysis:
             axial_width_sq_err = np.array([])
             radial_width_sq = np.array([])
             radial_width_sq_err = np.array([])
-
-            for subg in group.keys():
+            counter = 0
+            for subg in group.keys(): #Cycle through subfolders (ie TOF expansion)
                 image_list = group[subg]
                 x_width_sq = np.array([])
                 y_width_sq = np.array([])
-                for img in image_list.keys():
-                    img_data = group[subg][img]
-                    roi = {"xmin":20, "xmax":260, "ymin":20, "ymax":200} # choose a braod roi for the first fit trial
-                    fitresult = gaussianfit(img_data, roi)
-                    new_roi = {} # calculate a new roi based on the first fit result (use +/-3sigma region)
-                    new_roi["xmin"] = int(np.maximum(roi["xmin"]+fitresult["x_mean"]-3*fitresult["x_width"], 0))
-                    new_roi["xmax"] = int(np.minimum(roi["xmin"]+fitresult["x_mean"]+3*fitresult["x_width"], img_data.shape[0]))
-                    new_roi["ymin"] = int(np.maximum(roi["ymin"]+fitresult["y_mean"]-3*fitresult["y_width"], 0))
-                    new_roi["ymax"] = int(np.minimum(roi["ymin"]+fitresult["y_mean"]+3*fitresult["y_width"], img_data.shape[1]))
-                    fitresult = gaussianfit(img_data, new_roi, showimg=False) # make a second fit using the new roi
-                    x_width_sq =np.append(x_width_sq, (fitresult["x_width"]*param["pixeltomm"])**2)
-                    y_width_sq =np.append(y_width_sq, (fitresult["y_width"]*param["pixeltomm"])**2)
-                axial_width_sq = np.append(axial_width_sq, np.mean(y_width_sq))
-                axial_width_sq_err = np.append(axial_width_sq_err, np.std(y_width_sq)/np.sqrt(len(y_width_sq)))
-                radial_width_sq = np.append(radial_width_sq, np.mean(x_width_sq))
-                radial_width_sq_err = np.append(radial_width_sq_err, np.std(x_width_sq)/np.sqrt(len(x_width_sq)))
-                time_sq = np.append(time_sq, (float(subg.split("_")[-1])/1e6)**2) # convert ns to ms
+                print(counter)
+                counter += 1
+                if counter == 11.56:
+                     break
 
+                test = []
+                for img in image_list.keys():
+                    test.append(img)
+                print(type(group[subg][test[0]]))
+                print(group[subg][test[0]])
+
+                plt.figure()
+                plt.imshow(group[subg][test[0]], cmap='viridis')
+                plt.show()
+
+                img_data = np.array(group[subg][test[0]]) - np.array(group[subg][test[1]]) #Signal - Background
+                roi = {"xmin":0, "xmax":350, "ymin":0, "ymax":360} # choose a braod roi for the first fit trial
+                new_roi = roi
+                fitresult = gaussianfit(img_data, roi, showimg = True)
+                new_roi = {} # calculate a new roi based on the first fit result (use +/-3sigma region)
+                new_roi["xmin"] = int(np.maximum(roi["xmin"]+fitresult["x_mean"]-3*fitresult["x_width"], 0))
+                new_roi["xmax"] = int(np.minimum(roi["xmin"]+fitresult["x_mean"]+3*fitresult["x_width"], img_data.shape[0]))
+                new_roi["ymin"] = int(np.maximum(roi["ymin"]+fitresult["y_mean"]-3*fitresult["y_width"], 0))
+                new_roi["ymax"] = int(np.minimum(roi["ymin"]+fitresult["y_mean"]+3*fitresult["y_width"], img_data.shape[1]))
+                print(new_roi)
+                fitresult = gaussianfit(img_data, new_roi, showimg=True) # make a second fit using the new roi
+                x_width_sq =np.append(x_width_sq, (fitresult["x_width"]*param["pixeltomm"])**2)
+                y_width_sq =np.append(y_width_sq, (fitresult["y_width"]*param["pixeltomm"])**2)
+                print(x_width_sq,np.std(x_width_sq))
+                axial_width_sq = np.append(axial_width_sq, np.mean(y_width_sq))
+                # axial_width_sq_err = np.append(axial_width_sq_err, np.std(y_width_sq)/np.sqrt(len(y_width_sq)))
+                axial_width_sq_err = np.append(axial_width_sq_err,.1)
+                radial_width_sq = np.append(radial_width_sq, np.mean(x_width_sq))
+                # radial_width_sq_err = np.append(radial_width_sq_err, np.std(x_width_sq)/np.sqrt(len(x_width_sq)))
+                radial_width_sq_err = np.append(radial_width_sq_err, .1)
+                time_sq = np.append(time_sq, (float(subg.split("_")[-1])/1e6+0.5)**2) # convert ns to ms
+                print(time_sq)
         return (time_sq, axial_width_sq, axial_width_sq_err, radial_width_sq, radial_width_sq_err)
 
     def plot(self, time_sq, width_sq, width_sq_err, type="", param={}):
@@ -141,6 +163,7 @@ class tofanalysis:
             return
 
         popt, pcov = linearfit(time_sq, width_sq, width_sq_err)
+        print(width_sq_err)
         fit_chisq = np.sum(((linear(time_sq, *popt)-width_sq)/width_sq_err)**2)
         reduced_chisq = fit_chisq/(len(time_sq)-2)
         # gof = 100*(1 - stats.chi2.cdf(fit_chisq, len(time_sq)-2)) # in percent, goodness of fit, see https://faculty1.coloradocollege.edu/~sburns/toolbox/DataFitting.html
@@ -150,8 +173,8 @@ class tofanalysis:
         width_sq_fit = linear(x, *popt)
         c = stats.norm.ppf((1+param["confidence_band"])/2) # 95% confidence level gives critical value c=1.96
         perr = np.sqrt(np.diag(pcov)) # gives the standard deviation of fitting parameters
-        temp = popt[0]*param["m"]/k*1e6 # convert to uK
-        temp_err = perr[0]*param["m"]/k*1e6
+        temp = popt[0]*param["m"]/1.380649e-23*1e6 # convert to uK
+        temp_err = perr[0]*param["m"]/1.380649e-23*1e6
         radius = np.sqrt(popt[1])
         radius_err = 0.5*perr[1]/np.sqrt(popt[1])
         label = type + ": {:.0f}({:.0f}) uK, {:.2f}({:.2f}) mm, $\chi^2_\\nu$: {:.2f}".format(temp, temp_err, radius, radius_err, reduced_chisq)
@@ -164,10 +187,11 @@ class tofanalysis:
         self.ax.fill_between(x, nom-c*std, nom+c*std, color=color, alpha=0.2, label="{:.0f}% confidence band".format(param["confidence_band"]*100))
 
 
-filepath = "C:/Users/dur!p5/github/pixelfly-python-control/saved_images/"
-filename = "images_20210920.hdf"
+
+filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
+filename = "images_20240227.hdf"
 fname = filepath + filename
-gname = "rfgray_20210920_174352"
+gname = "Density_20240227_" + "16" + "2211"
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)
 # indicate uncertainties at "confidence_band" confidence level
