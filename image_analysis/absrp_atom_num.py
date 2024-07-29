@@ -22,7 +22,7 @@ def gaussianfit(data, roi, showimg=False):
     # calculate moments for initial guess
     data = data[roi["xmin"]:roi["xmax"], roi["ymin"]:roi["ymax"]]
     if showimg:
-        plt.imshow(data)
+        plt.imshow(data, cmap = 'viridis')
         plt.show()
 
     total = np.sum(data)
@@ -59,7 +59,7 @@ class atomnumanalysis:
 
         # atom_num = np.random.rand(10)+3
 
-        mpl.style.use("seaborn")
+        mpl.style.use("seaborn-v0_8")
         self.fig, self.ax = plt.subplots()
         self.plot(atom_num, param=param)
         self.ax.set_xlabel("No. of images")
@@ -79,21 +79,32 @@ class atomnumanalysis:
             for img in group.keys():
                 test.append(img)
 
-            plt.figure()
-            plt.imshow(group[test[0]], cmap='viridis')
-            plt.show()
+            for i in range (1, int(len(group)/2)):
+                roi = {"xmin":0, "xmax":400, "ymin":0, "ymax":400} # choose a braod roi for the first fit trial
 
-            for i in range (int(len(group)/2)):
-                img_data = np.divide(np.array(group[test[i*2]]), np.array(group[test[2*i+1]]))
-                #img_data = np.divide(np.array(group[test[i*2]]) - np.full((348, 260), 200), np.array(group[test[2*i+1]])-np.full((348, 260), 200))
+
+
+                img_data = np.divide((np.array(group[test[i*2]])),((np.array(group[test[i*2+1]]))))
                 img_data = -1*np.log(img_data)
+
+
+                #img_data = np.divide(np.array(group[test[i*2]]) - np.full((348, 260), 200), np.array(group[test[2*i+1]])-np.full((348, 260), 200))
+               # img_data = -1*np.log(img_data)
+                data = img_data[roi["xmin"]:roi["xmax"], roi["ymin"]:roi["ymax"]]
+                if True:
+                    plt.imshow(data, cmap = 'viridis')
+                    plt.grid(None)
+                    plt.show()
+                # plt.figure()
+                # plt.imshow(img_data, cmap='viridis')
+                # plt.show()
 
                 #roi = {"xmin":70, "xmax":110, "ymin":40, "ymax":80} # choose a braod roi for the first fit trial for extend pixel range
                 roi = {"xmin":180, "xmax":220, "ymin":100, "ymax":140} # choose a braod roi for the first fit trial
                 #roi = {"xmin":0, "xmax":250, "ymin":100, "ymax":300} # choose a braod roi for the first fit trial
 
                 new_roi = roi
-                fitresult = gaussianfit(img_data, roi, showimg = True)
+                fitresult = gaussianfit(img_data, roi, showimg = False)
                 print(fitresult)
 
                 new_roi = {} # calculate a new roi based on the first fit result (use +/-3sigma region)
@@ -138,13 +149,14 @@ class atomnumanalysis:
         self.ax.fill_between(x, np.ones(len(atom_num))*(mean-c*std), np.ones(len(atom_num))*(mean+c*std), color=color, alpha=0.2, label="{:.0f}% confidence band".format(param["confidence_band"]*100))
 
 
+
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240304.hdf"
+filename = "images_20240702.hdf"
 fname = filepath + filename
-gname = "Density_20240304_" + "19" + "0011"
+gname = "DetuningPowerDependence" + "_20240702_123750"
 detuning = 0 # in MHz
 
-# calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)
+# calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2).
 # indicate uncertainties at "confidence_band" confidence level
 # plot pointwise confident band at "confidence_band" level
 tof = atomnumanalysis(fname, gname, detuning)

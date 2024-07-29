@@ -1,4 +1,5 @@
 import sys
+import ctypes
 import h5py
 import time
 import logging
@@ -17,9 +18,11 @@ import socket
 import selectors
 import struct
 from collections import deque
+from PyQt5.QtGui import QIcon
 
 from widgets import NewSpinBox, NewDoubleSpinBox, NewComboBox, Scrollarea, imageWidget
 
+window_icon_name = 'John_Doyle.ico'
 
 def gaussian(amp, x_mean, y_mean, x_width, y_width, offset):
     x_width = float(x_width)
@@ -1568,6 +1571,9 @@ class CameraGUI(qt.QMainWindow):
     def __init__(self, app):
         super().__init__()
         time.sleep(0.1) #It appears this sleep is necessary to run on python 3.11.2. Not sure why
+        
+        self.setWindowIcon(QIcon(window_icon_name))
+        
         self.setWindowTitle('pco.pixelfly usb (ring buffer)')
         self.setStyleSheet("QWidget{font: 10pt;}")
         # self.setStyleSheet("QToolTip{background-color: black; color: white; font: 10pt;}")
@@ -1618,6 +1624,10 @@ if __name__ == '__main__':
     app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
     main_window = CameraGUI(app)
 
+    # This is for making the window's icon
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mycompany.myproduct.subproduct.version")
+    app.setWindowIcon(QIcon(window_icon_name))
+    
     try:
         app.exec_()
         # make sure the camera is closed after the program exits
