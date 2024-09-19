@@ -100,7 +100,7 @@ class atomnumanalysis:
                 # plt.show()
 
                 #roi = {"xmin":70, "xmax":110, "ymin":40, "ymax":80} # choose a braod roi for the first fit trial for extend pixel range
-                roi = {"xmin":180, "xmax":220, "ymin":100, "ymax":140} # choose a braod roi for the first fit trial
+                roi = {"xmin":180, "xmax":220, "ymin":80, "ymax":120} # choose a braod roi for the first fit trial
                 #roi = {"xmin":0, "xmax":250, "ymin":100, "ymax":300} # choose a braod roi for the first fit trial
 
                 new_roi = roi
@@ -151,9 +151,9 @@ class atomnumanalysis:
 
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240702.hdf"
+filename = "images_20240730.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20240702_123750"
+gname = "DetuningPowerDependence" + "_20240730_190546"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2).

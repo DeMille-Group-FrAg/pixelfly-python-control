@@ -70,8 +70,8 @@ class atomnumanalysis:
         print(parameter)
         print(atom_num_gaussian_array)
 
-        plot_density = False
-        x_axis = "AOM Frequency"
+        plot_density = True
+        x_axis = "Qorvo EOM Control Box_ch0_amp"
         if plot_density:
             mpl.style.use("seaborn-v0_8")
             self.fig, self.ax = plt.subplots()
@@ -122,7 +122,7 @@ class atomnumanalysis:
                     img_data = np.divide(np.array(group[subg][image_list[int(2*i)]]), np.array(group[subg][image_list[int(2*i+1)]])) #Signal / Background
                     img_data = -1*np.log(img_data)
                     #roi = {"xmin":70, "xmax":110, "ymin":40, "ymax":80} # choose a braod roi for the first fit trial for extend pixel range
-                    roi = {"xmin":180, "xmax":220, "ymin":100, "ymax":140} # choose a braod roi for the first fit trial
+                    roi = {"xmin":180, "xmax":220, "ymin":80, "ymax":120} # choose a braod roi for the first fit trial
                     #roi = {"xmin":0, "xmax":250, "ymin":100, "ymax":300} # choose a braod roi for the first fit trial
 
                     new_roi = roi
@@ -181,9 +181,9 @@ class atomnumanalysis:
         #self.ax.fill_between(x, np.ones(len(atom_num))*(mean-c*std), np.ones(len(atom_num))*(mean+c*std), color=color, alpha=0.2, label="{:.0f}% confidence band".format(param["confidence_band"]*100))
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240628.hdf"
+filename = "images_20240905.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20240628_113504"
+gname = "DetuningPowerDependence" + "_20240905_162054"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)

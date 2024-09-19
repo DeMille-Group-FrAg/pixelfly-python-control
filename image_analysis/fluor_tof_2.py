@@ -113,7 +113,9 @@ class tofanalysis:
             radial_width_sq_err = np.array([])
             counter = 0
 
+            print("Reading group ", group)
             for subg in group.keys(): #Cycle through subfolders (ie TOF expansion)
+                print("Reading subgroup ", subg)
                 image_list = []
                 for img in group[subg].keys():
                     image_list.append(img)
@@ -191,9 +193,9 @@ class tofanalysis:
 
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240627.hdf"
+filename = "images_20240909.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20240627_174350"
+gname = "DetuningPowerDependence" + "_20240909_154515"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)
