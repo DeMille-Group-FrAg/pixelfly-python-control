@@ -301,18 +301,19 @@ class CamThread(PyQt5.QtCore.QThread):
         self.parent.device.cam.stop()
 
 # the class that handles camera interface (except taking images) and configuration
-class pixelfly:
+class panda:
     def __init__(self, parent):
         self.parent = parent
-
         try:
             # due to some unknow issues in computer IO and the way pco package is coded,
             # an explicit assignment to "interface" keyword is required
-            self.cam = pco.Camera(interface='USB 2.0')
+            self.cam = pco.Camera()
         except Exception as err:
             logging.error(traceback.format_exc())
             logging.error("Can't open camera")
             return
+
+        #print(self.cam.configuration)
 
         # initialize camera
         self.set_sensor_format(self.parent.defaults["sensor_format"]["default"])
@@ -320,9 +321,12 @@ class pixelfly:
         self.set_conv_factor(self.parent.defaults["conv_factor"]["default"])
         self.set_trigger_mode(self.parent.defaults["trigger_mode"]["default"], True)
         self.set_expo_time(self.parent.defaults["expo_time"].getfloat("default"))
+        self.set_roi(int(self.parent.defaults["sensor_format"].getint(self.sensor_format + " absolute_xmax")), 
+                    int(self.parent.defaults["sensor_format"].getint(self.sensor_format + " absolute_ymax")))
         self.set_binning(self.parent.defaults["binning"].getint("horizontal_default"),
                         self.parent.defaults["binning"].getint("vertical_default"))
         self.set_image_shape()
+        
 
     def set_sensor_format(self, arg):
         self.sensor_format = arg
@@ -334,7 +338,7 @@ class pixelfly:
     def set_clock_rate(self, arg):
         rate = self.parent.defaults["clock_rate"].getint(arg)
         self.cam.configuration = {"pixel rate": rate}
-        # print(f"clock rate = {arg}")
+        #print(f"clock rate = {arg}")
 
     # conversion factor, which is 1/gain or number of electrons/count
     def set_conv_factor(self, arg):
@@ -354,11 +358,20 @@ class pixelfly:
         self.cam.configuration = {'exposure time': expo_time}
         # print(f"exposure time (in seconds) = {expo_time}")
 
+    def set_roi(self, x1, y1):
+        self.cam.configuration = {'roi' : (1, 1, x1, y1)}
+
     # 4*4 binning at most
     def set_binning(self, bin_h, bin_v):
         self.binning = {"horizontal": int(bin_h), "vertical": int(bin_v)}
-        self.cam.configuration = {'binning': (self.binning["horizontal"], self.binning["vertical"])}
-        # print(f"binning = {bin_h} (horizontal), {bin_v} (vertical)")
+        current_roi = self.cam.configuration['roi']
+        #print(current_roi)
+        self.set_roi(int(current_roi[2]/self.binning["horizontal"]), int(current_roi[3]/self.binning["vertical"])
+        )
+        self.cam.configuration = {'binning': (self.binning["horizontal"], self.binning["vertical"], "sum")}
+        #print(self.cam.configuration)
+
+        #print(f"binning = {bin_h} (horizontal), {bin_v} (vertical)")
 
     # image size of camera returned image, depends on sensor format and binning
     def set_image_shape(self):
@@ -1574,7 +1587,7 @@ class CameraGUI(qt.QMainWindow):
         
         self.setWindowIcon(QIcon(window_icon_name))
         
-        self.setWindowTitle('pco.pixelfly usb (ring buffer)')
+        self.setWindowTitle('pco.panda usb (ring buffer)')
         self.setStyleSheet("QWidget{font: 10pt;}")
         # self.setStyleSheet("QToolTip{background-color: black; color: white; font: 10pt;}")
         self.app = app
@@ -1585,7 +1598,7 @@ class CameraGUI(qt.QMainWindow):
         self.defaults.read('defaults.ini')
 
         # instantiate other classes
-        self.device = pixelfly(self)
+        self.device = panda(self)
         self.control = Control(self)
         self.image_win = ImageWin(self)
 
