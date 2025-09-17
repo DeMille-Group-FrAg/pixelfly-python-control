@@ -79,17 +79,26 @@ class TcpThread(PyQt5.QtCore.QThread):
         self.host = self.parent.defaults["tcp_connection"]["host_addr"]
         self.port = self.parent.defaults["tcp_connection"].getint("port")
         self.sel = selectors.DefaultSelector()
+        self.connection_error = False
 
-        self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # Avoid bind() exception: OSError: [Errno 48] Address already in use
-        self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_sock.bind((self.host, self.port))
-        self.server_sock.listen()
-        logging.info(f"listening on: {(self.host, self.port)}")
-        self.server_sock.setblocking(False)
-        self.sel.register(self.server_sock, selectors.EVENT_READ, data=None)
+        try:
+            self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # Avoid bind() exception: OSError: [Errno 48] Address already in use
+            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_sock.bind((self.host, self.port))
+            self.server_sock.listen()
+            logging.info(f"listening on: {(self.host, self.port)}")
+            self.server_sock.setblocking(False)
+            self.sel.register(self.server_sock, selectors.EVENT_READ, data=None)
+        except Exception as err:
+            logging.error(f"TCP connection error: {err}")
+            self.connection_error = True
 
     def run(self):
+        if self.connection_error:
+            logging.warning("TCP thread not started due to connection error.")
+            return
+        
         while self.parent.control.tcp_active:
             events = self.sel.select(timeout=0.1)
             for key, mask in events:
@@ -304,17 +313,27 @@ class CamThread(PyQt5.QtCore.QThread):
 class pixelfly:
     def __init__(self, parent):
         self.parent = parent
-
+        
+        # Set default values first
+        self.cam = None
+        self.sensor_format = self.parent.defaults["sensor_format"]["default"]
+        self.trigger_mode = self.parent.defaults["trigger_mode"]["default"]
+        self.binning = {
+            "horizontal": self.parent.defaults["binning"].getint("horizontal_default"),
+            "vertical": self.parent.defaults["binning"].getint("vertical_default")
+        }
+        
         try:
             # due to some unknow issues in computer IO and the way pco package is coded,
             # an explicit assignment to "interface" keyword is required
             self.cam = pco.Camera(interface='USB 2.0')
+            self.camera_connected = True
+            logging.info("Camera connected successfully")
         except Exception as err:
-            logging.error(traceback.format_exc())
-            logging.error("Can't open camera")
-            return
+            logging.error(f"Failed to connect to camera. The error message is: \n{err}")
+            self.camera_connected = False
 
-        # initialize camera
+        # initialize camera settings (these methods should handle the case when cam is None)
         self.set_sensor_format(self.parent.defaults["sensor_format"]["default"])
         self.set_clock_rate(self.parent.defaults["clock_rate"]["default"])
         self.set_conv_factor(self.parent.defaults["conv_factor"]["default"])
@@ -326,39 +345,38 @@ class pixelfly:
 
     def set_sensor_format(self, arg):
         self.sensor_format = arg
-        format_cam = self.parent.defaults["sensor_format"][arg]
-        self.cam.sdk.set_sensor_format(format_cam)
-        self.cam.sdk.arm_camera()
-        # print(f"sensor format = {arg}")
+        if self.camera_connected:
+            format_cam = self.parent.defaults["sensor_format"][arg]
+            self.cam.sdk.set_sensor_format(format_cam)
+            self.cam.sdk.arm_camera()
 
     def set_clock_rate(self, arg):
-        rate = self.parent.defaults["clock_rate"].getint(arg)
-        self.cam.configuration = {"pixel rate": rate}
-        # print(f"clock rate = {arg}")
+        if self.camera_connected:
+            rate = self.parent.defaults["clock_rate"].getint(arg)
+            self.cam.configuration = {"pixel rate": rate}
 
     # conversion factor, which is 1/gain or number of electrons/count
     def set_conv_factor(self, arg):
-        conv = self.parent.defaults["conv_factor"].getint(arg)
-        self.cam.sdk.set_conversion_factor(conv)
-        self.cam.sdk.arm_camera()
-        # print(f"conversion factor = {arg}")
+        if self.camera_connected:
+            conv = self.parent.defaults["conv_factor"].getint(arg)
+            self.cam.sdk.set_conversion_factor(conv)
+            self.cam.sdk.arm_camera()
 
     def set_trigger_mode(self, text, checked):
-        if checked:
+        if checked and self.camera_connected:
             self.trigger_mode = text
             mode_cam = self.parent.defaults["trigger_mode"][text]
             self.cam.configuration = {"trigger": mode_cam}
-            # print(f"trigger source = {arg}")
 
     def set_expo_time(self, expo_time):
-        self.cam.configuration = {'exposure time': expo_time}
-        # print(f"exposure time (in seconds) = {expo_time}")
+        if self.camera_connected:
+            self.cam.configuration = {'exposure time': expo_time}
 
     # 4*4 binning at most
     def set_binning(self, bin_h, bin_v):
         self.binning = {"horizontal": int(bin_h), "vertical": int(bin_v)}
-        self.cam.configuration = {'binning': (self.binning["horizontal"], self.binning["vertical"])}
-        # print(f"binning = {bin_h} (horizontal), {bin_v} (vertical)")
+        if self.camera_connected:
+            self.cam.configuration = {'binning': (self.binning["horizontal"], self.binning["vertical"])}
 
     # image size of camera returned image, depends on sensor format and binning
     def set_image_shape(self):
@@ -409,6 +427,12 @@ class Control(Scrollarea):
         self.signal_count_deque = deque([], maxlen=20)
 
         # places GUI elements
+        camera_status = "Connected" if self.parent.device.camera_connected else "Not Connected"
+        status_color = "green" if self.parent.device.camera_connected else "red"
+        camera_status_label = qt.QLabel(f"Camera: {camera_status}")
+        camera_status_label.setStyleSheet(f"QLabel{{background-color: {status_color}; font-weight: bold;}}")
+        self.frame.addWidget(camera_status_label)
+
         self.place_recording()
         self.place_image_control()
         self.place_cam_control()
@@ -443,6 +467,7 @@ class Control(Scrollarea):
         self.stop_bt.clicked[bool].connect(lambda val: self.stop())
         record_frame.addWidget(self.stop_bt, 0, 2)
         self.stop_bt.setEnabled(False)
+        
 
         record_frame.addWidget(qt.QLabel("Measurement:"), 1, 0, 1, 1)
         self.meas_rblist = []
@@ -1179,11 +1204,21 @@ class Control(Scrollarea):
 
     def tcp_start(self):
         self.tcp_active = True
-        self.tcp_thread = TcpThread(self.parent)
-        self.tcp_thread.update_signal.connect(self.tcp_widgets_update)
-        self.tcp_thread.start_signal.connect(self.start)
-        self.tcp_thread.stop_signal.connect(self.stop)
-        self.tcp_thread.start()
+        try:
+            self.tcp_thread = TcpThread(self.parent)
+            if not self.tcp_thread.connection_error:
+                self.tcp_thread.update_signal.connect(self.tcp_widgets_update)
+                self.tcp_thread.start_signal.connect(self.start)
+                self.tcp_thread.stop_signal.connect(self.stop)
+                self.tcp_thread.start()
+            else:
+                logging.warning("TCP thread not started due to connection error")
+                self.tcp_active = False
+
+        except Exception as err:
+            logging.error(f"Error starting TCP thread: {err}")
+            self.tcp_active = False
+        
 
     def tcp_stop(self):
         self.tcp_active = False
