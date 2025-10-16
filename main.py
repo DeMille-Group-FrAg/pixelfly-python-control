@@ -18,7 +18,11 @@ import socket
 import selectors
 import struct
 from collections import deque
+import pickle
+import datetime
 from PyQt5.QtGui import QIcon
+from PyQt5.QtNetwork import QTcpServer, QTcpSocket, QHostAddress
+from PyQt5.QtCore import QByteArray, QDataStream, QIODevice, QThread, QObject, pyqtSignal, pyqtSlot, QTimer
 
 from widgets import NewSpinBox, NewDoubleSpinBox, NewComboBox, Scrollarea, imageWidget
 
@@ -63,7 +67,271 @@ def gaussianfit(data):
 
     return p_dict
 
+class ServerWorker(QObject):
+    """Worker that handles server operations in background thread"""
+    connection_status = pyqtSignal(str)
+    start_signal = pyqtSignal()
+    stop_signal = pyqtSignal()
+    finished = pyqtSignal()
+    
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+        self.server = None
+        self.client_socket = None
+        self.host_ip = self.parent.defaults["tcp_connection"]["host_addr"]
+        self.port = self.parent.defaults["tcp_connection"].getint("port")
 
+        self.server_active = False
+        
+        # Command queue for main thread to send commands to worker
+        self.cmd_queue = []
+        
+        # Timer intervals
+        self.cmd_interval = 0.1  # Check commands every 100ms
+        self.update_status_interval = 2  # Update camera status interval
+    
+    @pyqtSlot()
+    def process_commands(self):
+        """Process commands from main thread"""
+        
+        try:
+            # Process all available commands
+            while self.cmd_queue:
+                cmd = self.cmd_queue.pop(0)
+                if cmd == "SHUTDOWN":
+                    self.stop_server()
+                    return
+                # Add other command processing here as needed
+        except Exception as e:
+            logging.error(f"Error processing command: {str(e)}")
+
+
+    def process_received_objects(self, received_objects):
+        # For each element in the list of already received objects, we process accordingly
+        # Every time, the client will send this kind of message:
+        # message = {
+        #     "type": "status" (or "command", etc.),
+        #     "timestamp": datetime.now().isoformat(),
+        #     "payload": status
+        # }
+
+        for data_object in received_objects:
+            if not isinstance(data_object, dict) or 'type' not in data_object:
+                logging.error("Data object not legal. It is: ", data_object)
+                return  # or raise Exception, etc.         
+
+            if type == "command":
+                if data_object["payload"] == "Stop":
+                    self.stop_signal.emit()
+            
+            elif type == "sequence info":
+                seq_info = data_object["payload"]
+                with open(self.parent.defaults["scan_file_name"]["default"], "w") as f:
+                    f.write(seq_info)
+
+                # Then, we turn on the camera
+                self.start_signal.emit()
+                confirm_message = self.generate_message("confirm", "Received")
+                success = self.send_data(confirm_message)
+
+                if not success:
+                    logging.error(f"Server failed to confirm the sequence instruction.")
+
+
+    # Update the latest status of the camera
+    def update_server_status(self):
+        if not self.client_socket or not self.server_active:
+            return
+
+        status = "Running" if self.parent.control.active else "Idle"
+        status_message = self.generate_message("status", status)
+        self.send_data(status_message)
+
+    def generate_message(self, type, payload):
+        message = {
+            "type": type,
+            "timestamp": datetime.datetime.now(),
+            "payload": payload
+        }
+        return message
+
+
+    # Usually, you shouldn't need to modify, or even read the generic server methods 
+    # They handle generic functionality for a QTcpServer,including start, stop, hook a new client, send data and receive data
+
+    ########################################################
+    # ------------ GENERIC SERVER METHODS -----------------#
+    ########################################################
+
+    def start_server(self):
+        """Start the server on specified port"""
+        
+        try:
+            self.server = QTcpServer()
+            if self.server.listen(QHostAddress(self.host_ip), self.port):
+                self.server_active = True
+                self.connection_status.emit(f"Listening on port {self.port}")
+                logging.info(f"Server started successfully on {self.host_ip}:{self.port}")
+                
+                # Connect server signals
+                self.server.newConnection.connect(self.handle_new_connection)
+            else:
+                error_msg = f"Failed to start server: {self.server.errorString()}"
+                self.connection_status.emit(f"Error: {error_msg}")
+                logging.error(error_msg)
+                self.server = None
+                self.server_active = False
+                
+        except Exception as e:
+            error_msg = f"Exception starting server: {str(e)}"
+            self.connection_status.emit(f"Error: {error_msg}")
+            logging.eror(error_msg)
+            self.server_active = False
+    
+    @pyqtSlot()
+    def stop_server(self):
+        """Stop the server and clean up"""
+        self.server_active = False
+        
+        # Handle client socket
+        if self.client_socket:
+            try:
+                self.client_socket.readyRead.disconnect()
+                self.client_socket.disconnected.disconnect()
+                self.client_socket.error.disconnect()
+            except Exception as e:
+                print("Error in disconnecting client socket. Error is ", e)
+                pass
+            
+            if self.client_socket.state() == QTcpSocket.ConnectedState:
+                self.client_socket.disconnectFromHost()
+                if self.client_socket.state() != QTcpSocket.UnconnectedState:
+                    self.client_socket.waitForDisconnected(1000)
+            
+            self.client_socket.deleteLater()
+            self.client_socket = None
+
+        # Handle server
+        if self.server:
+            try:
+                self.server.newConnection.disconnect()
+            except Exception as e:
+                print("Error in disconnecting server. Error is ", e)
+                pass
+            
+            self.server.close()
+            self.server.deleteLater()
+            self.server = None
+        
+        self.connection_status.emit("Server stopped")
+        # logging.info("Server stopped successfully")
+
+        self.finished.emit()
+
+    
+    def handle_new_connection(self):
+        """Handle new client connections"""
+        if not self.server_active:
+            return
+            
+        self.client_socket = self.server.nextPendingConnection()
+        if self.client_socket:
+            client_info = f"{self.client_socket.peerAddress().toString()}:{self.client_socket.peerPort()}"
+            self.connection_status.emit(f"Connected client {client_info}")
+            
+            # Connect socket signals
+            self.client_socket.readyRead.connect(self.receive_data)
+            self.client_socket.disconnected.connect(self.handle_client_disconnected)
+            self.client_socket.error.connect(self.handle_socket_error)
+    
+    def handle_client_disconnected(self):
+        """Handle client disconnection"""
+        self.connection_status.emit("Client disconnected")
+        self.client_socket = None
+        
+    def handle_socket_error(self, error):
+        """Handle socket errors"""
+        if self.client_socket:
+            error_msg = self.client_socket.errorString()
+            self.connection_status.emit(f"Socket error: {error_msg}")
+            logging.error(f"Socket error: {error_msg}")
+
+    # Send any data (python object) to socket
+    def send_data(self, pyobj):
+        """Send data via socket"""
+        if not self.client_socket or not self.server_active:
+            logging.error("Cannot send data: Socket not connected.")
+            return False
+            
+        if self.client_socket.state() != QTcpSocket.ConnectedState:
+            logging.error("Cannot send data: Socket not connected.")
+            return False
+            
+        try:
+            data = pickle.dumps(pyobj)
+            block = QByteArray()
+            stream = QDataStream(block, QIODevice.WriteOnly)
+            stream.setVersion(QDataStream.Qt_5_0)
+            stream.writeUInt32(len(data))
+            stream.writeRawData(data)
+            bytes_written = self.client_socket.write(block)
+            self.client_socket.flush()
+            
+            if bytes_written == -1:
+                logging.error(f"Failed to send data {pyobj}")
+                return False
+            else:
+                return True     # Indicating success in sending data
+                
+        except Exception as e:
+            logging.error(f"Error sending data: {e}")
+            return False
+    
+    # Read from socket buffer, and pack all received python objects into a list and emit the list to a processing method
+    def receive_data(self):
+        """Receive data, append it to a persistent buffer, and process all complete objects"""
+        if not self.client_socket or not self.server_active:
+            return
+
+        data = self.client_socket.readAll()
+        if data.size() == 0:
+            return
+        
+        self.buffer.append(data)
+        received_objects = []
+        stream = QDataStream(self.buffer, QIODevice.ReadOnly)
+        stream.setVersion(QDataStream.Qt_5_0)
+        
+        while not stream.atEnd():
+            start_pos = stream.device().pos()
+
+            if self.buffer.size() - start_pos < 4:
+                break
+
+            size = stream.readUInt32()
+
+            if self.buffer.size() - stream.device().pos() < size:
+                stream.device().seek(start_pos)
+                break
+                
+            try:    
+                serialized_data = stream.readRawData(size)
+                received_obj = pickle.loads(serialized_data)
+                received_objects.append(received_obj)
+            except Exception as e:
+                logging.error(f"Deserialization error: {e}. Clearing buffer.")
+                self.buffer.clear()
+                break
+
+        final_pos = int(stream.device().pos())
+        if final_pos > 0:
+            self.buffer = self.buffer.right(self.buffer.size() - final_pos)
+
+        if received_objects:
+            self.data_received.emit(received_objects)
+    
+    
 # this thread handles TCP communication with another PC, it starts when this program starts
 # code is from https://github.com/qw372/Digital-transfer-cavity-laser-lock/blob/8db28c2edd13c2c474d68c4b45c8f322f94f909d/main.py#L1385
 class TcpThread(PyQt5.QtCore.QThread):
@@ -99,7 +367,7 @@ class TcpThread(PyQt5.QtCore.QThread):
             logging.warning("TCP thread not started due to connection error.")
             return
         
-        while self.parent.control.tcp_active:
+        while self.parent.control.server_active:
             events = self.sel.select(timeout=0.1)
             for key, mask in events:
                 if key.data is None:
@@ -419,9 +687,6 @@ class Control(Scrollarea):
 
         # control mode, can be "record" or "scan" in current implementation
         self.control_mode = None
-
-        # boolean variable, turned on when the TCP thread is started
-        self.tcp_active = False
 
         # save signal count
         self.signal_count_deque = deque([], maxlen=20)
@@ -783,13 +1048,9 @@ class Control(Scrollarea):
         self.server_addr_la.setToolTip("server = this PC")
         tcp_ctrl_frame.addRow("Server/This PC address:", self.server_addr_la)
 
-        self.client_addr_la = qt.QLabel("No connection")
-        self.client_addr_la.setStyleSheet("QLabel{background-color: gray;}")
-        tcp_ctrl_frame.addRow("Last client address:", self.client_addr_la)
-
-        self.last_write_la = qt.QLabel("No connection")
-        self.last_write_la.setStyleSheet("QLabel{background-color: gray;}")
-        tcp_ctrl_frame.addRow("Last connection time:", self.last_write_la)
+        self.server_status_Lbl = qt.QLabel("No connection")
+        self.server_status_Lbl.setStyleSheet("QLabel{background-color: gray;}")
+        tcp_ctrl_frame.addRow("Server status:", self.server_status_Lbl)
 
         self.restart_tcp_bt = qt.QPushButton("Restart Connection")
         self.restart_tcp_bt.clicked[bool].connect(lambda val: self.restart_tcp())
@@ -1203,7 +1464,7 @@ class Control(Scrollarea):
         self.parent.image_win.y_plot_lr.setBounds([0, self.parent.device.image_shape["ymax"]])
 
     def tcp_start(self):
-        self.tcp_active = True
+        self.server_active = True
         try:
             self.tcp_thread = TcpThread(self.parent)
             if not self.tcp_thread.connection_error:
@@ -1213,15 +1474,66 @@ class Control(Scrollarea):
                 self.tcp_thread.start()
             else:
                 logging.warning("TCP thread not started due to connection error")
-                self.tcp_active = False
+                self.server_active = False
 
         except Exception as err:
             logging.error(f"Error starting TCP thread: {err}")
-            self.tcp_active = False
+            self.server_active = False
+
+    def start_server_worker(self):
+        """Start the server in a background thread"""
         
+        # Create thread and worker
+        self.server_thread = QThread()
+        self.server_worker = ServerWorker(self.parent)
+        
+        # Move worker to thread
+        self.server_worker.moveToThread(self.server_thread)
+        
+        # Connect worker signals to main thread slots
+        self.server_worker.connection_status.connect(self.server_status_Lbl.setText)
+        self.server_worker.start_signal.connect(self.start)
+        self.server_worker.stop_signal.connect(self.stop)
+        
+        # Create timers in main thread for worker
+        self.create_timers_for_server_worker()
+        
+        # Connect thread signals
+        self.server_thread.started.connect(self.server_worker.start_server)
+        self.server_worker.finished.connect(self.server_thread.quit)
+        self.server_worker.finished.connect(self.server_worker.deleteLater)
+        self.server_thread.finished.connect(self.server_thread.deleteLater)
+        
+        # Start the thread
+        self.server_thread.start()
+        self.cmd_timer.start()
+        self.update_status_timer.start()
+
+    
+    def create_timers_for_server_worker(self):
+        """Create timers in main thread that call worker methods"""
+        self.cmd_timer = QTimer()
+        self.update_status_timer = QTimer()
+        
+        self.cmd_timer.setInterval(int(self.server_worker.cmd_interval * 1000))
+        self.update_status_timer.setInterval(int(self.server_worker.update_status_interval * 1000))
+        
+        self.cmd_timer.timeout.connect(self.server_worker.process_commands)
+        self.update_status_timer.timeout.connect(self.server_worker.update_server_status)
+        
+        # Clean up timers when worker finishes
+        self.server_worker.finished.connect(self.cmd_timer.stop)
+        self.server_worker.finished.connect(self.update_status_timer.stop)
+        self.server_worker.finished.connect(self.cmd_timer.deleteLater)
+        self.server_worker.finished.connect(self.update_status_timer.deleteLater)
+    
+    def stop_server_worker(self):
+        """Stop the server by sending command to worker"""
+        if getattr(self, "server_worker", None):
+            self.server_worker.cmd_queue.append("SHUTDOWN")      
 
     def tcp_stop(self):
-        self.tcp_active = False
+        self.server_active = False
         try:
             self.tcp_thread.wait() # wait until closed
         except AttributeError as err:
@@ -1235,7 +1547,7 @@ class Control(Scrollarea):
     def tcp_widgets_update(self, dict):
         t = dict.get("last write")
         if t:
-            self.last_write_la.setText(t)
+            self.server_status_Lbl.setText(t)
 
         addr = dict.get("client addr")
         if addr:
@@ -1369,7 +1681,9 @@ class Control(Scrollarea):
         server_host = self.parent.defaults["tcp_connection"]["host_addr"]
         server_port = self.parent.defaults["tcp_connection"]["port"]
         self.server_addr_la.setText(server_host+" ("+server_port+")")
-        self.tcp_start()
+
+        self.start_server_worker()
+        # self.tcp_start()
 
     def set_meas_mode(self, text, checked):
         if checked:
