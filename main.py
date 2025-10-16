@@ -1666,7 +1666,8 @@ if __name__ == '__main__':
     try:
         app.exec_()
         # make sure the camera is closed after the program exits
-        main_window.device.cam.close()
+        if main_window.device.camera_connected:
+            main_window.device.cam.close()
         sys.exit(0)
     except SystemExit:
         print("\nApp is closing...")
