@@ -23,7 +23,7 @@ import datetime
 from PyQt5.QtGui import QIcon
 from PyQt5.QtNetwork import QTcpServer, QTcpSocket, QHostAddress
 from PyQt5.QtCore import QByteArray, QDataStream, QIODevice, QThread, QObject, pyqtSignal, pyqtSlot, QTimer
-
+import queue
 from widgets import NewSpinBox, NewDoubleSpinBox, NewComboBox, Scrollarea, imageWidget
 
 window_icon_name = 'John_Doyle.ico'
@@ -70,6 +70,7 @@ def gaussianfit(data):
 class ServerWorker(QObject):
     """Worker that handles server operations in background thread"""
     connection_status = pyqtSignal(str)
+    data_received = pyqtSignal(list)
     start_signal = pyqtSignal()
     stop_signal = pyqtSignal()
     finished = pyqtSignal()
@@ -81,11 +82,11 @@ class ServerWorker(QObject):
         self.client_socket = None
         self.host_ip = self.parent.defaults["tcp_connection"]["host_addr"]
         self.port = self.parent.defaults["tcp_connection"].getint("port")
-
+        self.data_received.connect(self.process_received_objects)
         self.server_active = False
         
         # Command queue for main thread to send commands to worker
-        self.cmd_queue = []
+        self.cmd_queue = queue.Queue()
         
         # Timer intervals
         self.cmd_interval = 0.1  # Check commands every 100ms
