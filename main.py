@@ -95,17 +95,16 @@ class ServerWorker(QObject):
     @pyqtSlot()
     def process_commands(self):
         """Process commands from main thread"""
-        
-        try:
-            # Process all available commands
-            while self.cmd_queue:
-                cmd = self.cmd_queue.pop(0)
-                if cmd == "SHUTDOWN":
+
+        if not self.cmd_queue.empty():
+            try:
+                cmd, vals = self.cmd_queue.get_nowait()
+                if cmd == 'SHUTDOWN':
                     self.stop_server()
                     return
-                # Add other command processing here as needed
-        except Exception as e:
-            logging.error(f"Error processing command: {str(e)}")
+                
+            except queue.Empty:
+                pass
 
 
     def process_received_objects(self, received_objects):
