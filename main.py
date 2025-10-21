@@ -91,6 +91,8 @@ class ServerWorker(QObject):
         # Timer intervals
         self.cmd_interval = 0.1  # Check commands every 100ms
         self.update_status_interval = 2  # Update camera status interval
+
+        self.buffer = QByteArray()
     
     @pyqtSlot()
     def process_commands(self):
@@ -99,9 +101,6 @@ class ServerWorker(QObject):
         if not self.cmd_queue.empty():
             try:
                 cmd, vals = self.cmd_queue.get_nowait()
-                if cmd == 'SHUTDOWN':
-                    self.stop_server()
-                    return
                 
             except queue.Empty:
                 pass
@@ -109,23 +108,18 @@ class ServerWorker(QObject):
 
     def process_received_objects(self, received_objects):
         # For each element in the list of already received objects, we process accordingly
-        # Every time, the client will send this kind of message:
-        # message = {
-        #     "type": "status" (or "command", etc.),
-        #     "timestamp": datetime.now().isoformat(),
-        #     "payload": status
-        # }
-
+        # The received message should follow the same pattern as in the generate_message method 
         for data_object in received_objects:
             if not isinstance(data_object, dict) or 'type' not in data_object:
                 logging.error("Data object not legal. It is: ", data_object)
                 return  # or raise Exception, etc.         
-
-            if type == "command":
+            
+            message_type = data_object["type"]
+            if message_type == "command":
                 if data_object["payload"] == "Stop":
                     self.stop_signal.emit()
             
-            elif type == "sequence info":
+            elif message_type == "sequence info":
                 seq_info = data_object["payload"]
                 with open(self.parent.defaults["scan_file_name"]["default"], "w") as f:
                     f.write(seq_info)
@@ -172,7 +166,6 @@ class ServerWorker(QObject):
             if self.server.listen(QHostAddress(self.host_ip), self.port):
                 self.server_active = True
                 self.connection_status.emit(f"Listening on port {self.port}")
-                logging.info(f"Server started successfully on {self.host_ip}:{self.port}")
                 
                 # Connect server signals
                 self.server.newConnection.connect(self.handle_new_connection)
@@ -225,8 +218,6 @@ class ServerWorker(QObject):
             self.server = None
         
         self.connection_status.emit("Server stopped")
-        # logging.info("Server stopped successfully")
-
         self.finished.emit()
 
     
@@ -255,7 +246,7 @@ class ServerWorker(QObject):
         if self.client_socket:
             error_msg = self.client_socket.errorString()
             self.connection_status.emit(f"Socket error: {error_msg}")
-            logging.error(f"Socket error: {error_msg}")
+            # logging.error(f"Socket error: {error_msg}")
 
     # Send any data (python object) to socket
     def send_data(self, pyobj):
@@ -331,116 +322,6 @@ class ServerWorker(QObject):
         if received_objects:
             self.data_received.emit(received_objects)
     
-    
-# this thread handles TCP communication with another PC, it starts when this program starts
-# code is from https://github.com/qw372/Digital-transfer-cavity-laser-lock/blob/8db28c2edd13c2c474d68c4b45c8f322f94f909d/main.py#L1385
-class TcpThread(PyQt5.QtCore.QThread):
-    update_signal = PyQt5.QtCore.pyqtSignal(dict)
-    start_signal = PyQt5.QtCore.pyqtSignal()
-    stop_signal = PyQt5.QtCore.pyqtSignal()
-
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        self.data = bytes()
-        self.length_get = False
-        self.host = self.parent.defaults["tcp_connection"]["host_addr"]
-        self.port = self.parent.defaults["tcp_connection"].getint("port")
-        self.sel = selectors.DefaultSelector()
-        self.connection_error = False
-
-        try:
-            self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Avoid bind() exception: OSError: [Errno 48] Address already in use
-            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_sock.bind((self.host, self.port))
-            self.server_sock.listen()
-            logging.info(f"listening on: {(self.host, self.port)}")
-            self.server_sock.setblocking(False)
-            self.sel.register(self.server_sock, selectors.EVENT_READ, data=None)
-        except Exception as err:
-            logging.error(f"TCP connection error: {err}")
-            self.connection_error = True
-
-    def run(self):
-        if self.connection_error:
-            logging.warning("TCP thread not started due to connection error.")
-            return
-        
-        while self.parent.control.server_active:
-            events = self.sel.select(timeout=0.1)
-            for key, mask in events:
-                if key.data is None:
-                    # this event is from self.server_sock listening
-                    self.accept_wrapper(key.fileobj)
-                else:
-                    s = key.fileobj
-                    try:
-                        data = s.recv(1024) # 1024 bytes should be enough for our data
-                    except Exception as err:
-                        logging.error(f"TCP connection error: \n{err}")
-                        data = None
-                    if data:
-                        self.data += data
-                        while len(self.data) > 0:
-                            if (not self.length_get) and len(self.data) >= 4:
-                                self.length = struct.unpack(">I", self.data[:4])[0]
-                                self.length_get = True
-                                self.data = self.data[4:]
-                            elif self.length_get and len(self.data) >= self.length:
-                                message = self.data.decode('utf-8')
-                                # logging.info(message)
-                                if message == "Status?":
-                                    # if it's just a check in message to test connection
-                                    re = "Running" if self.parent.control.active else "Idle"
-                                    try:
-                                        s.sendall(re.encode('utf-8'))
-                                    except Exception as err:
-                                        logging.error(f"(tcp thread) Failed to reply the message. \n{err}")
-                                elif message == "Stop":
-                                    # if it's to stop running
-                                    self.stop_signal.emit()
-                                else:
-                                    # if it's a message about scan sequence
-                                    with open(self.parent.defaults["scan_file_name"]["default"], "w") as f:
-                                        f.write(message)
-
-                                    # turn on the camera here
-                                    self.start_signal.emit()
-                                    time.sleep(0.2)
-
-                                    try:
-                                        s.sendall("Received".encode('utf-8'))
-                                    except Exception as err:
-                                        logging.error(f"(tcp thread) Failed to reply the message. \n{err}")
-                                t = time.time()
-                                time_string = time.strftime("%Y-%m-%d  %H:%M:%S.", time.localtime(t))
-                                time_string += "{:1.0f}".format((t%1)*10) # get 0.1 s time resolution
-                                return_dict = {"last write": time_string}
-                                self.update_signal.emit(return_dict)
-                                self.data = self.data[self.length:]
-                                self.length_get = False
-                            else:
-                                break
-                    else:
-                        # empty data will be interpreted as the signal of client shutting down
-                        logging.info("client shutting down...")
-                        self.sel.unregister(s)
-                        s.close()
-                        self.length_get = False
-                        self.data = bytes()
-
-        self.sel.unregister(self.server_sock)
-        self.server_sock.close()
-        self.sel.close()
-
-    def accept_wrapper(self, sock):
-        conn, addr = sock.accept()  # Should be ready to read
-        logging.info(f"accepted connection from: {addr}")
-        conn.setblocking(False)
-        self.sel.register(conn, selectors.EVENT_READ, data=123) # In this application, 'data' keyword can be anything but None
-        return_dict = {"client addr": addr}
-        self.update_signal.emit(return_dict)
 
 # the thread called when the program starts to interface with camera and take images
 # this thread waits unitl a new image is available and read it out from the camera
@@ -654,6 +535,7 @@ class pixelfly:
 
 # the class that places elements in UI and handles data processing
 class Control(Scrollarea):
+    server_stop = pyqtSignal()
     def __init__(self, parent):
         super().__init__(parent, label="", type="vbox")
         self.setMaximumWidth(400)
@@ -1052,9 +934,13 @@ class Control(Scrollarea):
         self.server_status_Lbl.setStyleSheet("QLabel{background-color: gray;}")
         tcp_ctrl_frame.addRow("Server status:", self.server_status_Lbl)
 
-        self.restart_tcp_bt = qt.QPushButton("Restart Connection")
-        self.restart_tcp_bt.clicked[bool].connect(lambda val: self.restart_tcp())
-        tcp_ctrl_frame.addRow("Restart:", self.restart_tcp_bt)
+        self.start_server_Btn = qt.QPushButton("Start server")
+        self.start_server_Btn.clicked.connect(self.start_server_worker)
+
+        self.stop_server_Btn = qt.QPushButton("Stop server")
+        self.stop_server_Btn.clicked.connect(self.stop_server_worker)
+        
+        tcp_ctrl_frame.addRow(self.start_server_Btn, self.stop_server_Btn)
 
     # place save/load program configuration gui elements
     def place_save_load(self):
@@ -1463,22 +1349,6 @@ class Control(Scrollarea):
         self.parent.image_win.x_plot_lr.setBounds([0, self.parent.device.image_shape["xmax"]])
         self.parent.image_win.y_plot_lr.setBounds([0, self.parent.device.image_shape["ymax"]])
 
-    def tcp_start(self):
-        self.server_active = True
-        try:
-            self.tcp_thread = TcpThread(self.parent)
-            if not self.tcp_thread.connection_error:
-                self.tcp_thread.update_signal.connect(self.tcp_widgets_update)
-                self.tcp_thread.start_signal.connect(self.start)
-                self.tcp_thread.stop_signal.connect(self.stop)
-                self.tcp_thread.start()
-            else:
-                logging.warning("TCP thread not started due to connection error")
-                self.server_active = False
-
-        except Exception as err:
-            logging.error(f"Error starting TCP thread: {err}")
-            self.server_active = False
 
     def start_server_worker(self):
         """Start the server in a background thread"""
@@ -1503,11 +1373,15 @@ class Control(Scrollarea):
         self.server_worker.finished.connect(self.server_thread.quit)
         self.server_worker.finished.connect(self.server_worker.deleteLater)
         self.server_thread.finished.connect(self.server_thread.deleteLater)
+        self.server_stop.connect(self.server_worker.stop_server)
         
         # Start the thread
         self.server_thread.start()
         self.cmd_timer.start()
         self.update_status_timer.start()
+
+        self.start_server_Btn.setEnabled(False)
+        self.stop_server_Btn.setEnabled(True)
 
     
     def create_timers_for_server_worker(self):
@@ -1521,27 +1395,22 @@ class Control(Scrollarea):
         self.cmd_timer.timeout.connect(self.server_worker.process_commands)
         self.update_status_timer.timeout.connect(self.server_worker.update_server_status)
         
-        # Clean up timers when worker finishes
-        self.server_worker.finished.connect(self.cmd_timer.stop)
-        self.server_worker.finished.connect(self.update_status_timer.stop)
-        self.server_worker.finished.connect(self.cmd_timer.deleteLater)
-        self.server_worker.finished.connect(self.update_status_timer.deleteLater)
     
     def stop_server_worker(self):
         """Stop the server by sending command to worker"""
-        if getattr(self, "server_worker", None):
-            self.server_worker.cmd_queue.append("SHUTDOWN")      
+        if getattr(self, "server_worker", None) and is_qt_object_alive(self.server_worker):
+            self.cmd_timer.stop()
+            self.cmd_timer.timeout.disconnect()
+            self.cmd_timer.deleteLater()
 
-    def tcp_stop(self):
-        self.server_active = False
-        try:
-            self.tcp_thread.wait() # wait until closed
-        except AttributeError as err:
-            pass
+            self.update_status_timer.stop()
+            self.update_status_timer.disconnect()
+            self.update_status_timer.deleteLater()
 
-    def restart_tcp(self):
-        self.tcp_stop()
-        self.tcp_start()
+            self.server_stop.emit()
+
+            self.start_server_Btn.setEnabled(True) 
+            self.stop_server_Btn.setEnabled(False)
 
     @PyQt5.QtCore.pyqtSlot(dict)
     def tcp_widgets_update(self, dict):
@@ -1676,14 +1545,12 @@ class Control(Scrollarea):
         self.bin_hori_cb.setCurrentText(config["camera_control"].get("binning_horizontal"))
         self.bin_vert_cb.setCurrentText(config["camera_control"].get("binning_vertical"))
 
-        self.tcp_stop()
         self.parent.defaults["tcp_connection"] = config["tcp_control"]
         server_host = self.parent.defaults["tcp_connection"]["host_addr"]
         server_port = self.parent.defaults["tcp_connection"]["port"]
         self.server_addr_la.setText(server_host+" ("+server_port+")")
 
         self.start_server_worker()
-        # self.tcp_start()
 
     def set_meas_mode(self, text, checked):
         if checked:
@@ -1951,6 +1818,9 @@ class CameraGUI(qt.QMainWindow):
         self.show()
 
     def closeEvent(self, event):
+        self.control.stop_server_worker()
+        time.sleep(0.03)
+
         if not self.control.active:
             self.control.save_settings(latest=True)
             super().closeEvent(event)
@@ -1967,6 +1837,13 @@ class CameraGUI(qt.QMainWindow):
             else:
                 event.ignore()
 
+def is_qt_object_alive(obj):
+    """A reliable way to check if Qt object truly exists"""
+    try:
+        return not PyQt5.sip.isdeleted(obj) if obj is not None else False
+    except Exception as e:
+        logging.error(f"Error checking if Qt object is alive: {e}")
+        return False
 
 if __name__ == '__main__':
     app = qt.QApplication(sys.argv)
