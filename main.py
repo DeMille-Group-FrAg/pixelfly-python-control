@@ -847,6 +847,20 @@ class Control(Scrollarea):
         self.scan_elem_name = self.scan_config["general"].get("scanned_devices_parameters")
         self.scan_elem_name = self.scan_elem_name.split(",")
         self.scan_elem_name = self.scan_elem_name[0].strip()
+        
+        # === DEBUG: Print mode and scan parameter ===
+        if self.scan_elem_name:
+            self.control_mode = "scan"
+            self.signal_count_dict = {}
+            print(f"\n=== MODE: SCAN (scan parameter: '{self.scan_elem_name}') ===")
+        else:
+            self.control_mode = "record"
+            print("\n=== MODE: RECORD ===")
+
+        # Print HDF5 file info
+        print(f"Saving to HDF5 file: {self.hdf_filename}")
+        print(f"Group name: {self.hdf_group_name}\n")
+        
         if self.scan_elem_name:
             self.control_mode = "scan"
         else:
@@ -1010,6 +1024,13 @@ class Control(Scrollarea):
             # save imagees to local hdf file
             # in "record" mode, all images are save in the same group
             # in "scan" mode, images of the same value of scan parameter are saved in the same group
+            
+            # === DEBUG: Print image save info ===
+            if self.control_mode == "scan":
+                print(f"[Scan Point] Parameter '{self.scan_elem_name}' = {img_dict['scan_param']}")
+            print(f"Saving image {img_dict['counter']} as: 'image_{img_dict['counter']:06d}'")
+            
+            
             with h5py.File(self.hdf_filename, "r+") as hdf_file:
                 root = hdf_file.require_group(self.hdf_group_name)
                 if self.control_mode == "scan":
@@ -1625,7 +1646,8 @@ if __name__ == '__main__':
     main_window = CameraGUI(app)
 
     # This is for making the window's icon
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mycompany.myproduct.subproduct.version")
+    myappid = "Silver.PixelFly"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     app.setWindowIcon(QIcon(window_icon_name))
     
     try:

@@ -181,9 +181,9 @@ class atomnumanalysis:
         #self.ax.fill_between(x, np.ones(len(atom_num))*(mean-c*std), np.ones(len(atom_num))*(mean+c*std), color=color, alpha=0.2, label="{:.0f}% confidence band".format(param["confidence_band"]*100))
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240905.hdf"
+filename = "images_20241021.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20240905_162054"
+gname = "DetuningPowerDependence" + "_20241021_152811"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2)

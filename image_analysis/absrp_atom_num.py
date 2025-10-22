@@ -151,9 +151,9 @@ class atomnumanalysis:
 
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20240730.hdf"
+filename = "images_20241021.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20240730_190546"
+gname = "DetuningPowerDependence" + "_20241021_152323"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2).
