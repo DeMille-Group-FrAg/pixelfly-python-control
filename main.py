@@ -14,9 +14,6 @@ import PyQt5.QtWidgets as qt
 import os
 import pco
 import qdarkstyle # see https://github.com/ColinDuquesnoy/QDarkStyleSheet
-import socket
-import selectors
-import struct
 from collections import deque
 import pickle
 import datetime
@@ -82,7 +79,6 @@ class ServerWorker(QObject):
         self.client_socket = None
         self.host_ip = self.parent.defaults["tcp_connection"]["host_addr"]
         self.port = self.parent.defaults["tcp_connection"].getint("port")
-        self.data_received.connect(self.process_received_objects)
         self.server_active = False
         
         # Command queue for main thread to send commands to worker
@@ -1383,6 +1379,8 @@ class Control(Scrollarea):
         
         # Connect worker signals to main thread slots
         self.server_worker.connection_status.connect(self.server_status_Lbl.setText)
+        self.server_worker.data_received.connect(self.server_worker.process_received_objects)   
+        # Important: we wish data_received signal and the process_received_objects to be handled in the worker thread, we only bind the signal after moving the worker to the thread.
         self.server_worker.start_signal.connect(self.start)
         self.server_worker.stop_signal.connect(self.stop)
         
@@ -1433,15 +1431,6 @@ class Control(Scrollarea):
             self.start_server_Btn.setEnabled(True) 
             self.stop_server_Btn.setEnabled(False)
 
-    @PyQt5.QtCore.pyqtSlot(dict)
-    def tcp_widgets_update(self, dict):
-        t = dict.get("last write")
-        if t:
-            self.server_status_Lbl.setText(t)
-
-        addr = dict.get("client addr")
-        if addr:
-            self.client_addr_la.setText(dict["client addr"][0]+" ("+str(dict["client addr"][1])+")")
 
     def save_settings(self, latest=False):
         if latest:
