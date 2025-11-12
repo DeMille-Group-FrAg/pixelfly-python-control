@@ -328,6 +328,8 @@ class CamThread(PyQt5.QtCore.QThread):
         super().__init__()
         self.parent = parent
         self.image_order = [x.strip() for x in self.parent.defaults["measurement"]["image_order"].split(',')]
+        self.images_per_sequence = len(self.image_order)
+
         self.pixeltomm = self.parent.defaults["atomic"].getfloat('pixeltomm')
         self.cross_section = self.parent.defaults["atomic"].getfloat('cross_section')
         self.counter_limit = self.parent.control.num_img_to_take*len(self.image_order)
@@ -366,7 +368,7 @@ class CamThread(PyQt5.QtCore.QThread):
             if self.parent.control.active:
                 print('made it!')
                 image, meta = self.parent.device.cam.image(image_index=0xFFFFFFFF) # readout the lastest image
-                image_type = self.image_order[self.counter%2] # odd-numbered image is signal, even-numbered image is background
+                image_type = self.image_order[self.counter%self.images_per_sequence] # 0 mod 3 image is signal, 1 mod 3 image is background. 2 mod 3 image is noise
                 # image is in "unit16" data type, althought it only has 14 non-zero bits at most
                 # convert the image data type to float, to avoid overflow
                 print(image_type)
@@ -388,6 +390,12 @@ class CamThread(PyQt5.QtCore.QThread):
                     self.img_dict["type"] = "signal"
                     self.img_dict["counter"] = self.counter
                     self.img_dict["image"] = image
+
+                elif image_type == "noise":
+                    self.image_noise = image
+                    self.img_dict["type"] = "noise"
+                    self.img_dict["counter"] = self.counter
+                    self.img_dict["image"] = image
                     
                 else:
                     logging.warning("Measurement type not supported.")
@@ -399,15 +407,15 @@ class CamThread(PyQt5.QtCore.QThread):
                     scan_param = self.parent.control.scan_config[f"scan_value_{num-1}"][self.parent.control.scan_elem_name]
                     self.img_dict["scan_param"] = scan_param
                                                        
-                if self.counter%2 == 1: #checking to see if this is the second image taken
+                if self.counter % self.images_per_sequence == self.images_per_sequence - 1: #checking to see if this is the last image taken for this sequence
                     if self.parent.control.meas_mode == "fluorescence": 
-                        image_post = self.image_signal - self.image_bg
+                        image_post = (self.image_signal - self.image_noise) - (self.image_bg - self.image_noise)
                         image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
                                                         self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]
                    
                         sc = np.sum(image_post_roi) # signal count 
                     elif self.parent.control.meas_mode == "absorption":
-                        image_post = np.divide(self.image_signal, self.image_bg)
+                        image_post = np.divide(self.image_signal - self.image_noise, self.image_bg - self.image_noise)
                         image_post = -np.log(image_post)                        
                         image_post_roi = image_post[self.parent.control.roi["xmin"] : self.parent.control.roi["xmax"],
                                                         self.parent.control.roi["ymin"] : self.parent.control.roi["ymax"]]    
@@ -445,9 +453,6 @@ class CamThread(PyQt5.QtCore.QThread):
                 self.signal.emit(self.img_dict)
                 
                 self.counter += 1   
-                # If I call "update imge" function here to update images in main thread, it sometimes work but sometimes not.
-                # It may be because PyQt is not thread safe. A signal-slot way seemed to be preferred,
-                # e.g. https://stackoverflow.com/questions/54961905/real-time-plotting-using-pyqtgraph-and-threading
 
                 logging.info(f"image {self.counter}: "+"{:.5f} s".format(time.time()-self.last_time))
 
@@ -1079,7 +1084,7 @@ class Control(Scrollarea):
     # function that will be called in every experimental cycle to update GUI display
     @PyQt5.QtCore.pyqtSlot(dict)
     def img_ctrl_update(self, img_dict):
-        img_type = img_dict["type"] # "image" or "bkg"
+        img_type = img_dict["type"] # "image" or "bkg" or "noise"
         if img_type == "background":
             img = img_dict["image"]
             # update background image
@@ -1088,8 +1093,10 @@ class Control(Scrollarea):
             # update signal images
             img = img_dict["image"]
             self.parent.image_win.imgs_dict["Raw Signal"].setImage(img, autoLevels=self.parent.image_win.auto_scale_state_dict["Raw Signal"])
+        elif img_type == "Noise":
+            self.parent.image_win.imgs_dict["Noise"].setImage(img_dict["image"], autoLevels=self.parent.image_win.auto_scale_state_dict["Noise"])
 
-        if img_dict['counter']%2 == 1: #Checking if second image
+        if 'image_post' in img_dict: #Checking if this is the final processed info for one sequence
             self.num_image.setText(str(img_dict["num_image"]))
 
             img = img_dict["image_post"]
@@ -1190,7 +1197,7 @@ class Control(Scrollarea):
                 self.parent.image_win.y_plot_roi_fit_curve.setData(np.array([]))
 
         if self.img_save:
-            # save imagees to local hdf file
+            # save images to local hdf file
             # in "record" mode, all images are save in the same group
             # in "scan" mode, images of the same value of scan parameter are saved in the same group
             
@@ -1581,7 +1588,7 @@ class ImageWin(Scrollarea):
         self.img_roi_dict = {}
         self.auto_scale_chb_dict = {}
         self.auto_scale_state_dict = {}
-        self.imgs_name = ["Background", "Raw Signal", "Signal minus ave bkg", "Optical density"]
+        self.imgs_name = ["Background", "Raw Signal", "Noise", "Signal minus ave bkg", "Optical density"]
 
         for name in self.imgs_name:
             self.auto_scale_state_dict[name] = self.parent.defaults.getboolean("image_auto_scale", name)
