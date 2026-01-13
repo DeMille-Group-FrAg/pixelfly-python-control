@@ -88,6 +88,7 @@ class atomnumanalysis:
                 img_data = -1*np.log(img_data)
 
 
+
                 #img_data = np.divide(np.array(group[test[i*2]]) - np.full((348, 260), 200), np.array(group[test[2*i+1]])-np.full((348, 260), 200))
                # img_data = -1*np.log(img_data)
                 data = img_data[roi["xmin"]:roi["xmax"], roi["ymin"]:roi["ymax"]]
@@ -151,9 +152,9 @@ class atomnumanalysis:
 
 
 filepath = "C:/Users/13128/jmd/pixelfly-python-control/saved_images/"
-filename = "images_20241021.hdf"
+filename = "images_20251112.hdf"
 fname = filepath + filename
-gname = "DetuningPowerDependence" + "_20241021_152323"
+gname = "DetuningPowerDependence_20251112_205830"
 detuning = 0 # in MHz
 
 # calculate and plot temperature, inital rms radius, reduced \chi^2, 1-CDF(\chi^2).
